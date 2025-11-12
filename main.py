@@ -14,7 +14,7 @@ import time
 import json
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-
+from dashboard import show_dashboard, show_collection_report_with_headlines
 import streamlit as st
 
 # local modules
@@ -54,7 +54,10 @@ cfg = load_or_copy_config()  # reload after potential save
 # -------------------------
 # Streamlit page config
 # -------------------------
-st.set_page_config(page_title="ProDocChat", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(
+    page_title="ProDocChat", layout="wide", initial_sidebar_state="expanded"
+)
+
 
 # -------------------------
 # Helpers
@@ -64,7 +67,10 @@ def trigger_rerun() -> None:
     try:
         st.query_params = {"_refresh": ts}
     except Exception:
-        st.session_state["_refresh_flag"] = not st.session_state.get("_refresh_flag", False)
+        st.session_state["_refresh_flag"] = not st.session_state.get(
+            "_refresh_flag", False
+        )
+
 
 def pick_folder_tk() -> Optional[str]:
     if tk is None or filedialog is None:
@@ -81,6 +87,7 @@ def pick_folder_tk() -> Optional[str]:
     except Exception:
         return None
 
+
 # -------------------------
 # Collections persistence helpers
 # -------------------------
@@ -93,6 +100,7 @@ def load_collections() -> Dict[str, Dict]:
             return {}
     return {}
 
+
 def save_collections(data: Dict[str, Dict]) -> None:
     try:
         with open(COLLECTIONS_JSON, "w", encoding="utf-8") as f:
@@ -100,7 +108,9 @@ def save_collections(data: Dict[str, Dict]) -> None:
     except Exception as e:
         st.error(f"Failed to save collections: {e}")
 
+
 collections = load_collections()
+
 
 # -------------------------
 # Chat persistence
@@ -108,9 +118,11 @@ collections = load_collections()
 def sanitize_name(name: str) -> str:
     return "".join(c if c.isalnum() or c in "-_." else "_" for c in name)
 
+
 def chat_file_for(collection_name: str) -> str:
     safe = sanitize_name(collection_name)
     return os.path.join(CHATS_DIR, f"{safe}.json")
+
 
 def load_chat(collection_name: str) -> List[Dict]:
     path = chat_file_for(collection_name)
@@ -122,6 +134,7 @@ def load_chat(collection_name: str) -> List[Dict]:
             return []
     return []
 
+
 def save_chat(collection_name: str, messages: List[Dict]) -> None:
     path = chat_file_for(collection_name)
     try:
@@ -130,10 +143,12 @@ def save_chat(collection_name: str, messages: List[Dict]) -> None:
     except Exception:
         pass
 
+
 # -------------------------
 # Watcher: incremental indexing
 # -------------------------
 _watchers: Dict[str, Any] = {}
+
 
 class RebuildHandler(FileSystemEventHandler):
     def __init__(self, collection_name: str):
@@ -148,6 +163,7 @@ class RebuildHandler(FileSystemEventHandler):
         if not event.is_directory:
             _process_file(event.src_path, self.collection)
 
+
 def _process_file(path: str, collection_name: str) -> None:
     try:
         items = ingest_file(path)
@@ -161,7 +177,10 @@ def _process_file(path: str, collection_name: str) -> None:
             wf.write(f"{time.asctime()}: indexed {path} into {collection_name}\n")
     except Exception as e:
         with open(os.path.join(USER_DIR, "watcher.log"), "a", encoding="utf-8") as wf:
-            wf.write(f"{time.asctime()}: failed to index {path} into {collection_name}: {e}\n")
+            wf.write(
+                f"{time.asctime()}: failed to index {path} into {collection_name}: {e}\n"
+            )
+
 
 def start_watching(collection_name: str, folder_path: str) -> None:
     if collection_name in _watchers:
@@ -178,6 +197,7 @@ def start_watching(collection_name: str, folder_path: str) -> None:
     except Exception as e:
         st.error(f"Failed to start watcher for {collection_name}: {e}")
 
+
 def stop_watching(collection_name: str) -> None:
     obs = _watchers.pop(collection_name, None)
     if obs:
@@ -189,6 +209,7 @@ def stop_watching(collection_name: str) -> None:
     collections.setdefault(collection_name, {})["watching"] = False
     save_collections(collections)
 
+
 # Resume watchers at startup
 if "watchers_resumed" not in st.session_state:
     for cname, meta in list(collections.items()):
@@ -198,8 +219,12 @@ if "watchers_resumed" not in st.session_state:
                 try:
                     start_watching(cname, folder)
                 except Exception:
-                    with open(os.path.join(USER_DIR, "watcher.log"), "a", encoding="utf-8") as wf:
-                        wf.write(f"{time.asctime()}: failed to resume watcher for {cname}\n")
+                    with open(
+                        os.path.join(USER_DIR, "watcher.log"), "a", encoding="utf-8"
+                    ) as wf:
+                        wf.write(
+                            f"{time.asctime()}: failed to resume watcher for {cname}\n"
+                        )
     st.session_state["watchers_resumed"] = True
 
 # Ensure chat history in session
@@ -248,14 +273,28 @@ if st.sidebar.button("Stop all watchers"):
     trigger_rerun()
 
 # Main menu choices (includes Settings)
-menu = st.sidebar.radio("Menu", ["Create Collection", "Collections", "Chat", "Settings"], index=0, key="menu_selected")
+menu = st.sidebar.radio(
+    "Menu",
+    [
+        "Create Collection",
+        "Collections",
+        "Chat",
+        "Settings",
+        "Dashboard",
+        "Collection Report",
+    ],
+    index=0,
+    key="menu_selected",
+)
 
 # -------------------------
 # Create Collection
 # -------------------------
 if menu == "Create Collection":
     st.title("Create Collection")
-    st.markdown("Create a named collection that points to a local folder. Use Browse to pick a folder (desktop only).")
+    st.markdown(
+        "Create a named collection that points to a local folder. Use Browse to pick a folder (desktop only)."
+    )
 
     folder_key = "create_folder_path"
     if folder_key not in st.session_state:
@@ -273,11 +312,17 @@ if menu == "Create Collection":
 
     with st.form("create_form"):
         name = st.text_input("Collection name", value="")
-        folder_input = st.text_input("Folder path (full)", value=st.session_state.get(folder_key, ""), key="create_folder_path_form")
+        folder_input = st.text_input(
+            "Folder path (full)",
+            value=st.session_state.get(folder_key, ""),
+            key="create_folder_path_form",
+        )
         submitted = st.form_submit_button("Save collection")
         if submitted:
             name_clean = (name or "").strip()
-            path_val = st.session_state.get("create_folder_path_form", st.session_state.get(folder_key, ""))
+            path_val = st.session_state.get(
+                "create_folder_path_form", st.session_state.get(folder_key, "")
+            )
             if not name_clean:
                 st.error("Collection name is required")
             elif not path_val or not Path(path_val).exists():
@@ -298,21 +343,36 @@ if menu == "Create Collection":
 # -------------------------
 elif menu == "Collections":
     st.title("Collections")
-    st.markdown("Saved collections. Build (index), Start/Stop Watch, Delete, or change folder path.")
+    st.markdown(
+        "Saved collections. Build (index), Start/Stop Watch, Delete, or change folder path."
+    )
     if not collections:
         st.info("No collections found. Create one from the Create Collection menu.")
     else:
         for cname, meta in sorted(collections.items(), key=lambda kv: kv[0].lower()):
             with st.container():
-                st.markdown(f"<div class='card'><div class='left-title'>{cname}</div>", unsafe_allow_html=True)
-                st.markdown(f"<div class='small'>{meta.get('path','')}</div>", unsafe_allow_html=True)
-                st.markdown(f"<div class='muted'>Last indexed: {meta.get('last_indexed') or 'never'} {'• Watching' if meta.get('watching') else ''}</div>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<div class='card'><div class='left-title'>{cname}</div>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    f"<div class='small'>{meta.get('path','')}</div>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    f"<div class='muted'>Last indexed: {meta.get('last_indexed') or 'never'} {'• Watching' if meta.get('watching') else ''}</div>",
+                    unsafe_allow_html=True,
+                )
 
                 path_key = f"path_input_{cname}"
                 if path_key not in st.session_state:
                     st.session_state[path_key] = meta.get("path", "")
 
-                st.text_input("Folder path (edit)", value=st.session_state.get(path_key, ""), key=path_key)
+                st.text_input(
+                    "Folder path (edit)",
+                    value=st.session_state.get(path_key, ""),
+                    key=path_key,
+                )
 
                 col1, col2, col3 = st.columns([2, 2, 2])
                 with col1:
@@ -325,7 +385,14 @@ elif menu == "Collections":
                             total = 0
                             with st.spinner(f"Indexing {cname}..."):
                                 for f in files:
-                                    if f.suffix.lower() in [".pdf", ".txt", ".md", ".csv", ".xlsx", ".xls"]:
+                                    if f.suffix.lower() in [
+                                        ".pdf",
+                                        ".txt",
+                                        ".md",
+                                        ".csv",
+                                        ".xlsx",
+                                        ".xls",
+                                    ]:
                                         try:
                                             items = ingest_file(str(f))
                                             if not items:
@@ -336,8 +403,16 @@ elif menu == "Collections":
                                             add_documents(cname, docs, metas, embs)
                                             total += len(docs)
                                         except Exception as e:
-                                            with open(os.path.join(USER_DIR, "index_errors.log"), "a", encoding="utf-8") as lf:
-                                                lf.write(f"{time.asctime()}: failed {f}: {e}\n")
+                                            with open(
+                                                os.path.join(
+                                                    USER_DIR, "index_errors.log"
+                                                ),
+                                                "a",
+                                                encoding="utf-8",
+                                            ) as lf:
+                                                lf.write(
+                                                    f"{time.asctime()}: failed {f}: {e}\n"
+                                                )
                             ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
                             collections[cname]["last_indexed"] = ts
                             save_collections(collections)
@@ -352,7 +427,9 @@ elif menu == "Collections":
                             trigger_rerun()
                     else:
                         if st.button("Start Watch", key=f"startwatch_{cname}"):
-                            new_path = st.session_state.get(path_key, collections[cname].get("path", ""))
+                            new_path = st.session_state.get(
+                                path_key, collections[cname].get("path", "")
+                            )
                             if new_path and Path(new_path).exists():
                                 collections[cname]["path"] = str(Path(new_path))
                                 save_collections(collections)
@@ -360,7 +437,9 @@ elif menu == "Collections":
                                 st.success("Started watcher")
                                 trigger_rerun()
                             else:
-                                st.error("Valid folder path required before starting watch.")
+                                st.error(
+                                    "Valid folder path required before starting watch."
+                                )
                     if st.button("Browse", key=f"browse_{cname}"):
                         sel = pick_folder_tk()
                         if sel:
@@ -390,7 +469,9 @@ elif menu == "Collections":
 # -------------------------
 elif menu == "Chat":
     st.title("Chat")
-    st.markdown("Select a collection at top; messages scroll; input stays fixed at bottom.")
+    st.markdown(
+        "Select a collection at top; messages scroll; input stays fixed at bottom."
+    )
 
     if not collections:
         st.info("No collections exist. Create one first.")
@@ -433,45 +514,88 @@ elif menu == "Chat":
             user_text = st.text_area("Message", key=user_text_key, height=100)
         with col_send:
             if st.button("Send", key=f"send_{selected}"):
-                if not st.session_state.get(user_text_key) or not st.session_state[user_text_key].strip():
+                if (
+                    not st.session_state.get(user_text_key)
+                    or not st.session_state[user_text_key].strip()
+                ):
                     st.error("Type a message first.")
                 else:
                     user_msg = st.session_state[user_text_key].strip()
-                    hist.append({"role": "user", "text": user_msg, "ts": time.strftime("%Y-%m-%d %H:%M:%S")})
+                    hist.append(
+                        {
+                            "role": "user",
+                            "text": user_msg,
+                            "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        }
+                    )
                     save_chat(selected, hist)
                     try:
                         q_emb = embed_texts([user_msg])[0]
                         res = query(selected, q_emb, n=4)
-                        docs = res.get("documents", [[]])[0] if isinstance(res.get("documents", []), list) else []
-                        metadatas = res.get("metadatas", [[]])[0] if isinstance(res.get("metadatas", []), list) else []
+                        docs = (
+                            res.get("documents", [[]])[0]
+                            if isinstance(res.get("documents", []), list)
+                            else []
+                        )
+                        metadatas = (
+                            res.get("metadatas", [[]])[0]
+                            if isinstance(res.get("metadatas", []), list)
+                            else []
+                        )
                         context = ""
                         if docs:
-                            context = "\n\n---\n\n".join([f"Source: {m.get('source')}\n{d}" for m, d in zip(metadatas, docs)])
-                        answer = chat_with_context("You are a helpful assistant.", user_msg, context)
-                        hist.append({"role": "assistant", "text": answer, "ts": time.strftime("%Y-%m-%d %H:%M:%S")})
+                            context = "\n\n---\n\n".join(
+                                [
+                                    f"Source: {m.get('source')}\n{d}"
+                                    for m, d in zip(metadatas, docs)
+                                ]
+                            )
+                        answer = chat_with_context(
+                            "You are a helpful assistant.", user_msg, context
+                        )
+                        hist.append(
+                            {
+                                "role": "assistant",
+                                "text": answer,
+                                "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            }
+                        )
                         save_chat(selected, hist)
                     except Exception as e:
-                        hist.append({"role": "assistant", "text": f"Error: {e}", "ts": time.strftime("%Y-%m-%d %H:%M:%S")})
+                        hist.append(
+                            {
+                                "role": "assistant",
+                                "text": f"Error: {e}",
+                                "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            }
+                        )
                         save_chat(selected, hist)
 
                     st.session_state[just_sent_key] = True
                     trigger_rerun()
 
         st.markdown("</div>", unsafe_allow_html=True)
+# when user chooses dashboard menu:
+if menu == "Dashboard":
+    show_dashboard(USER_DIR, COLLECTIONS_JSON)
 
+elif menu == "Collection Report":
+    show_collection_report_with_headlines(USER_DIR, COLLECTIONS_JSON)
 # -------------------------
 # Settings page (keeps sidebar visible)
 # -------------------------
 elif menu == "Settings":
     st.title("Settings")
-    st.markdown("Edit Azure OpenAI configuration and app preferences. Changes are saved to your user data directory.")
+    st.markdown(
+        "Edit Azure OpenAI configuration and app preferences. Changes are saved to your user data directory."
+    )
 
     # reload current cfg so editor pre-fills latest
     cfg = load_or_copy_config()
     show_settings_editor(cfg, USER_DIR)
 
     # small UX: show a back link to return to previous menu (default Chat)
-    col_back, col_blank = st.columns([1,9])
+    col_back, col_blank = st.columns([1, 9])
     with col_back:
         if st.button("Back to App"):
             st.session_state["menu_selected"] = "Chat"
