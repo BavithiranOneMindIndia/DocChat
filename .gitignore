@@ -1,0 +1,14 @@
+@"
+.venv/
+__pycache__/
+.env
+config.ini
+*.db
+*.parquet
+chromadb/
+AppData/
+user_data/
+*.log
+.DS_Store
+Thumbs.db
+"@ | Out-File -Encoding UTF8 .gitignore

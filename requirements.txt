@@ -1,0 +1,16 @@
+streamlit
+chromadb
+openai
+pymupdf
+pandas
+python-docx
+watchdog
+appdirs
+python-dotenv
+pyinstaller
+tqdm
+python-multipart
+xlrd
+openpyxl
+pdfplumber
+tqdm
