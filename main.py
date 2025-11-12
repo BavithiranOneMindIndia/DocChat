@@ -1,22 +1,24 @@
 # main.py
 """
-ProDocChat main UI — updated to keep chat input fixed (sticky) at bottom.
+ProDocChat - main Streamlit UI (updated to keep sidebar visible while editing Settings)
 
-Menus:
- - Create Collection
- - Collections
- - Chat (select at top, messages scroll, input frozen at bottom)
+Changes:
+- Settings is a top-level menu item (keeps sidebar visible).
+- "Settings / Edit Azure config" button will switch to the Settings menu.
+- First-run config enforcement remains (show_settings_if_missing).
+- No st.stop() that hides sidebar; settings render in main area.
 """
 
 import os
 import time
 import json
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any, Optional
 
 import streamlit as st
 
 # local modules
+from config_ui import show_settings_if_missing, show_settings_editor
 from utils import load_or_copy_config, get_user_data_dir, ensure_collections_dir
 from ingest import ingest_file
 from azure_client import embed_texts, chat_with_context
@@ -26,7 +28,7 @@ from store import add_documents, query
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-# tkinter for native folder picker (local runs only)
+# tkinter for native folder picker (local only)
 try:
     import tkinter as tk
     from tkinter import filedialog
@@ -35,7 +37,7 @@ except Exception:
     filedialog = None
 
 # -------------------------
-# Config & data paths
+# Load config & user dir
 # -------------------------
 cfg = load_or_copy_config()
 APP_NAME = cfg.get("app", "app_name", fallback="ProDocChat").strip() or "ProDocChat"
@@ -44,6 +46,10 @@ ensure_collections_dir(cfg)
 COLLECTIONS_JSON = os.path.join(USER_DIR, "collections.json")
 CHATS_DIR = os.path.join(USER_DIR, "chats")
 os.makedirs(CHATS_DIR, exist_ok=True)
+
+# Enforce config on first run (blocks until filled)
+show_settings_if_missing(cfg, USER_DIR)
+cfg = load_or_copy_config()  # reload after potential save
 
 # -------------------------
 # Streamlit page config
@@ -75,7 +81,9 @@ def pick_folder_tk() -> Optional[str]:
     except Exception:
         return None
 
-# Collections persistence
+# -------------------------
+# Collections persistence helpers
+# -------------------------
 def load_collections() -> Dict[str, Dict]:
     if os.path.exists(COLLECTIONS_JSON):
         try:
@@ -94,7 +102,9 @@ def save_collections(data: Dict[str, Dict]) -> None:
 
 collections = load_collections()
 
+# -------------------------
 # Chat persistence
+# -------------------------
 def sanitize_name(name: str) -> str:
     return "".join(c if c.isalnum() or c in "-_." else "_" for c in name)
 
@@ -144,7 +154,7 @@ def _process_file(path: str, collection_name: str) -> None:
         if not items:
             return
         docs = [c for _, c in items]
-        metas = [{"source": p} for p, _ in items]
+        metas = [{"source": s} for s, _ in items]
         embs = embed_texts(docs)
         add_documents(collection_name, docs, metas, embs)
         with open(os.path.join(USER_DIR, "watcher.log"), "a", encoding="utf-8") as wf:
@@ -179,7 +189,7 @@ def stop_watching(collection_name: str) -> None:
     collections.setdefault(collection_name, {})["watching"] = False
     save_collections(collections)
 
-# resume watchers on first load
+# Resume watchers at startup
 if "watchers_resumed" not in st.session_state:
     for cname, meta in list(collections.items()):
         if meta.get("watching"):
@@ -192,51 +202,24 @@ if "watchers_resumed" not in st.session_state:
                         wf.write(f"{time.asctime()}: failed to resume watcher for {cname}\n")
     st.session_state["watchers_resumed"] = True
 
-# session chat history
+# Ensure chat history in session
 if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = {}
 
 # -------------------------
-# CSS for chat sticky input + styling
+# CSS (layout & sticky input)
 # -------------------------
 st.markdown(
     """
     <style>
-    /* chat messages area: fill viewport minus header/footer room */
-    .chat-messages {
-      height: calc(100vh - 220px);
-      overflow: auto;
-      padding: 12px;
-      background: #0b0c0e;
-      border-radius: 8px;
-      border: 1px solid #162022;
-    }
-    /* container that holds the input area and sticks to bottom of its parent */
-    .chat-input-wrapper {
-      position: sticky;
-      bottom: 0;
-      background: transparent;
-      padding-top: 8px;
-      margin-top: 8px;
-    }
-    /* small tweaks for message bubbles */
-    .msg-user {
-      background: #2b7a2b;
-      color: #fff;
-      padding: 10px 14px;
-      border-radius: 14px;
-      display: inline-block;
-      max-width: 80%;
-    }
-    .msg-assistant {
-      background: #131417;
-      color: #ddd;
-      padding: 10px 14px;
-      border-radius: 12px;
-      display: inline-block;
-      max-width: 80%;
-      border: 1px solid #222;
-    }
+    .muted { color:#9aa0a6; font-size:13px; }
+    .small { font-size:12px; color:#9aa0a6; }
+    .card { background:#0f1112; padding:12px; border-radius:8px; margin-bottom:8px; border:1px solid #202427; }
+    .left-title { font-weight:700; font-size:18px; margin-bottom:6px; }
+    .chat-messages { height: calc(100vh - 260px); overflow:auto; padding:12px; background:#0b0c0e; border-radius:8px; border:1px solid #162022; }
+    .chat-input-wrapper { position: sticky; bottom: 0; background: transparent; padding-top: 8px; margin-top: 8px; }
+    .msg-user { background: #2b7a2b; color: #fff; padding: 10px 14px; border-radius: 14px; display:inline-block; max-width:80%; }
+    .msg-assistant { background: #131417; color: #ddd; padding: 10px 14px; border-radius: 12px; display:inline-block; max-width:80%; border:1px solid #222; }
     .msg-ts { font-size: 11px; color: #9aa0a6; margin-top:4px; }
     </style>
     """,
@@ -244,27 +227,36 @@ st.markdown(
 )
 
 # -------------------------
-# Sidebar menu
+# Sidebar: app title + controls
 # -------------------------
-menu = st.sidebar.radio("Menu", ["Create Collection", "Collections", "Chat"])
+st.sidebar.title(APP_NAME)
 st.sidebar.markdown("---")
 st.sidebar.markdown("Data directory:")
 st.sidebar.code(USER_DIR)
 st.sidebar.markdown("Collections file:")
 st.sidebar.code(COLLECTIONS_JSON)
 st.sidebar.markdown("---")
+
+# Button to quickly switch to Settings menu (keeps sidebar)
+if st.sidebar.button("Settings / Edit Azure config"):
+    st.session_state["menu_selected"] = "Settings"
+
 if st.sidebar.button("Stop all watchers"):
     for c in list(_watchers.keys()):
         stop_watching(c)
     st.sidebar.success("Stopped watchers")
     trigger_rerun()
 
+# Main menu choices (includes Settings)
+menu = st.sidebar.radio("Menu", ["Create Collection", "Collections", "Chat", "Settings"], index=0, key="menu_selected")
+
 # -------------------------
-# Create Collection page (Browse outside form)
+# Create Collection
 # -------------------------
 if menu == "Create Collection":
     st.title("Create Collection")
-    st.markdown("Create a named collection that points to a local folder. Use Browse to pick a folder (local runs only).")
+    st.markdown("Create a named collection that points to a local folder. Use Browse to pick a folder (desktop only).")
+
     folder_key = "create_folder_path"
     if folder_key not in st.session_state:
         st.session_state[folder_key] = str(Path.home())
@@ -274,9 +266,9 @@ if menu == "Create Collection":
         st.markdown(f"**Folder:** `{st.session_state[folder_key]}`")
     with col_browse_r:
         if st.button("Browse", key="browse_create"):
-            selected = pick_folder_tk()
-            if selected:
-                st.session_state[folder_key] = selected
+            sel = pick_folder_tk()
+            if sel:
+                st.session_state[folder_key] = sel
                 trigger_rerun()
 
     with st.form("create_form"):
@@ -295,7 +287,7 @@ if menu == "Create Collection":
                 collections[name_clean]["watching"] = False
                 collections[name_clean]["last_indexed"] = None
                 save_collections(collections)
-                save_chat(name_clean, [])
+                save_chat(name_clean, [])  # initialize chat file
                 st.success(f"Collection '{name_clean}' saved")
                 st.session_state["selected_collection"] = name_clean
                 st.session_state[folder_key] = path_val
@@ -306,25 +298,28 @@ if menu == "Create Collection":
 # -------------------------
 elif menu == "Collections":
     st.title("Collections")
-    st.markdown("List of saved collections. Build / Start Watch / Stop Watch / Delete.")
+    st.markdown("Saved collections. Build (index), Start/Stop Watch, Delete, or change folder path.")
     if not collections:
-        st.info("No collections found.")
+        st.info("No collections found. Create one from the Create Collection menu.")
     else:
         for cname, meta in sorted(collections.items(), key=lambda kv: kv[0].lower()):
             with st.container():
-                st.markdown(f"### {cname}")
-                st.markdown(f"`{meta.get('path','')}`")
-                st.markdown(f"Last indexed: {meta.get('last_indexed') or 'never'}  {'• Watching' if meta.get('watching') else ''}")
+                st.markdown(f"<div class='card'><div class='left-title'>{cname}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='small'>{meta.get('path','')}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='muted'>Last indexed: {meta.get('last_indexed') or 'never'} {'• Watching' if meta.get('watching') else ''}</div>", unsafe_allow_html=True)
+
                 path_key = f"path_input_{cname}"
                 if path_key not in st.session_state:
                     st.session_state[path_key] = meta.get("path", "")
+
                 st.text_input("Folder path (edit)", value=st.session_state.get(path_key, ""), key=path_key)
-                col1, col2, col3 = st.columns([2,2,2])
+
+                col1, col2, col3 = st.columns([2, 2, 2])
                 with col1:
                     if st.button("Build / Index", key=f"build_{cname}"):
                         folder = Path(collections[cname].get("path", ""))
                         if not folder.exists():
-                            st.error("Folder not found; update path first.")
+                            st.error("Folder not found; update the path first.")
                         else:
                             files = list(folder.rglob("*.*"))
                             total = 0
@@ -348,6 +343,7 @@ elif menu == "Collections":
                             save_collections(collections)
                             st.success(f"Indexed {total} chunks into '{cname}'")
                             trigger_rerun()
+
                 with col2:
                     if collections[cname].get("watching"):
                         if st.button("Stop Watch", key=f"stopwatch_{cname}"):
@@ -364,7 +360,7 @@ elif menu == "Collections":
                                 st.success("Started watcher")
                                 trigger_rerun()
                             else:
-                                st.error("Valid folder path required.")
+                                st.error("Valid folder path required before starting watch.")
                     if st.button("Browse", key=f"browse_{cname}"):
                         sel = pick_folder_tk()
                         if sel:
@@ -372,6 +368,7 @@ elif menu == "Collections":
                             collections[cname]["path"] = sel
                             save_collections(collections)
                             trigger_rerun()
+
                 with col3:
                     if st.button("Delete", key=f"delete_{cname}"):
                         stop_watching(cname)
@@ -386,17 +383,18 @@ elif menu == "Collections":
                         st.success(f"Deleted {cname}")
                         trigger_rerun()
 
+                st.markdown("</div>", unsafe_allow_html=True)
+
 # -------------------------
-# Chat page (select on top, messages scroll, input sticky at bottom)
+# Chat page
 # -------------------------
 elif menu == "Chat":
     st.title("Chat")
-    st.markdown("Select a collection at the top; messages scroll in the middle; input stays at the bottom.")
+    st.markdown("Select a collection at top; messages scroll; input stays fixed at bottom.")
 
     if not collections:
         st.info("No collections exist. Create one first.")
     else:
-        # Select collection — kept at top
         names = list(collections.keys())
         default_index = 0
         if st.session_state.get("selected_collection") in names:
@@ -404,13 +402,11 @@ elif menu == "Chat":
         selected = st.selectbox("Select collection", names, index=default_index)
         st.session_state["selected_collection"] = selected
 
-        # load chat into session (if not present)
         if selected not in st.session_state["chat_history"]:
             st.session_state["chat_history"][selected] = load_chat(selected)
+
         hist = st.session_state["chat_history"][selected]
 
-        # messages area (scrollable)
-        # we render the entire messages HTML inside a div with class chat-messages so it scrolls
         msgs_html = "<div class='chat-messages'>"
         for m in hist:
             role = m.get("role")
@@ -424,20 +420,16 @@ elif menu == "Chat":
 
         st.markdown(msgs_html, unsafe_allow_html=True)
 
-        # Input wrapper (sticky at bottom of viewport)
         st.markdown("<div class='chat-input-wrapper'>", unsafe_allow_html=True)
         just_sent_key = f"just_sent_{selected}"
         user_text_key = f"chat_input_{selected}"
 
-        # Clear input before widget creation if just sent previously
         if st.session_state.get(just_sent_key):
             st.session_state[user_text_key] = ""
             st.session_state.pop(just_sent_key, None)
 
-        # Create the input and send controls
-        col_inp, col_send = st.columns([10,1])
+        col_inp, col_send = st.columns([10, 1])
         with col_inp:
-            # instantiate text area (this will appear inside the sticky wrapper visually)
             user_text = st.text_area("Message", key=user_text_key, height=100)
         with col_send:
             if st.button("Send", key=f"send_{selected}"):
@@ -462,11 +454,28 @@ elif menu == "Chat":
                         hist.append({"role": "assistant", "text": f"Error: {e}", "ts": time.strftime("%Y-%m-%d %H:%M:%S")})
                         save_chat(selected, hist)
 
-                    # set flag to clear input on next run and trigger rerun
                     st.session_state[just_sent_key] = True
                     trigger_rerun()
 
         st.markdown("</div>", unsafe_allow_html=True)
+
+# -------------------------
+# Settings page (keeps sidebar visible)
+# -------------------------
+elif menu == "Settings":
+    st.title("Settings")
+    st.markdown("Edit Azure OpenAI configuration and app preferences. Changes are saved to your user data directory.")
+
+    # reload current cfg so editor pre-fills latest
+    cfg = load_or_copy_config()
+    show_settings_editor(cfg, USER_DIR)
+
+    # small UX: show a back link to return to previous menu (default Chat)
+    col_back, col_blank = st.columns([1,9])
+    with col_back:
+        if st.button("Back to App"):
+            st.session_state["menu_selected"] = "Chat"
+            trigger_rerun()
 
 # Footer
 st.markdown("---")
